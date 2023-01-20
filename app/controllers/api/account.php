@@ -1516,15 +1516,24 @@ App::patch('/v1/account/name')
     ->label('sdk.offline.model', '/account')
     ->label('sdk.offline.key', 'current')
     ->param('name', '', new Text(128), 'User name. Max length: 128 chars.')
+    ->inject('request')
     ->inject('response')
     ->inject('user')
     ->inject('dbForProject')
     ->inject('events')
-    ->action(function (string $name, Response $response, Document $user, Database $dbForProject, Event $events) {
+    ->action(function (string $name, Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
 
-        $user = $dbForProject->updateDocument('users', $user->getId(), $user
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
+        }
+
+        $user
             ->setAttribute('name', $name)
-            ->setAttribute('search', implode(' ', [$user->getId(), $name, $user->getAttribute('email', ''), $user->getAttribute('phone', '')])));
+            ->setAttribute('search', implode(' ', [$user->getId(), $name, $user->getAttribute('email', ''), $user->getAttribute('phone', '')]));
+
+        $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
 
         $events->setParam('userId', $user->getId());
 
@@ -1551,22 +1560,31 @@ App::patch('/v1/account/password')
     ->label('sdk.offline.key', 'current')
     ->param('password', '', new Password(), 'New user password. Must be at least 8 chars.')
     ->param('oldPassword', '', new Password(), 'Current user password. Must be at least 8 chars.', true)
+    ->inject('request')
     ->inject('response')
     ->inject('user')
     ->inject('dbForProject')
     ->inject('events')
-    ->action(function (string $password, string $oldPassword, Response $response, Document $user, Database $dbForProject, Event $events) {
+    ->action(function (string $password, string $oldPassword, Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
 
         // Check old password only if its an existing user.
         if (!empty($user->getAttribute('passwordUpdate')) && !Auth::passwordVerify($oldPassword, $user->getAttribute('password'), $user->getAttribute('hash'), $user->getAttribute('hashOptions'))) { // Double check user password
             throw new Exception(Exception::USER_INVALID_CREDENTIALS);
         }
 
-        $user = $dbForProject->updateDocument('users', $user->getId(), $user
-                ->setAttribute('password', Auth::passwordHash($password, Auth::DEFAULT_ALGO, Auth::DEFAULT_ALGO_OPTIONS))
-                ->setAttribute('hash', Auth::DEFAULT_ALGO)
-                ->setAttribute('hashOptions', Auth::DEFAULT_ALGO_OPTIONS)
-                ->setAttribute('passwordUpdate', DateTime::now()));
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
+        }
+
+        $user
+            ->setAttribute('password', Auth::passwordHash($password, Auth::DEFAULT_ALGO, Auth::DEFAULT_ALGO_OPTIONS))
+            ->setAttribute('hash', Auth::DEFAULT_ALGO)
+            ->setAttribute('hashOptions', Auth::DEFAULT_ALGO_OPTIONS)
+            ->setAttribute('passwordUpdate', DateTime::now());
+
+        $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
 
         $events->setParam('userId', $user->getId());
 
@@ -1593,11 +1611,12 @@ App::patch('/v1/account/email')
     ->label('sdk.offline.key', 'current')
     ->param('email', '', new Email(), 'User email.')
     ->param('password', '', new Password(), 'User password. Must be at least 8 chars.')
+    ->inject('request')
     ->inject('response')
     ->inject('user')
     ->inject('dbForProject')
     ->inject('events')
-    ->action(function (string $email, string $password, Response $response, Document $user, Database $dbForProject, Event $events) {
+    ->action(function (string $email, string $password, Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
         $isAnonymousUser = Auth::isAnonymousUser($user); // Check if request is from an anonymous account for converting
 
         if (
@@ -1605,6 +1624,12 @@ App::patch('/v1/account/email')
             !Auth::passwordVerify($password, $user->getAttribute('password'), $user->getAttribute('hash'), $user->getAttribute('hashOptions'))
         ) { // Double check user password
             throw new Exception(Exception::USER_INVALID_CREDENTIALS);
+        }
+
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
         }
 
         $email = \strtolower($email);
@@ -1618,7 +1643,7 @@ App::patch('/v1/account/email')
             ->setAttribute('search', implode(' ', [$user->getId(), $user->getAttribute('name', ''), $email, $user->getAttribute('phone', '')]));
 
         try {
-            $user = $dbForProject->updateDocument('users', $user->getId(), $user);
+            $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
         } catch (Duplicate $th) {
             throw new Exception(Exception::USER_EMAIL_ALREADY_EXISTS);
         }
@@ -1648,11 +1673,12 @@ App::patch('/v1/account/phone')
     ->label('sdk.offline.key', 'current')
     ->param('phone', '', new Phone(), 'Phone number. Format this number with a leading \'+\' and a country code, e.g., +16175551212.')
     ->param('password', '', new Password(), 'User password. Must be at least 8 chars.')
+    ->inject('request')
     ->inject('response')
     ->inject('user')
     ->inject('dbForProject')
     ->inject('events')
-    ->action(function (string $phone, string $password, Response $response, Document $user, Database $dbForProject, Event $events) {
+    ->action(function (string $phone, string $password, Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
 
         $isAnonymousUser = Auth::isAnonymousUser($user); // Check if request is from an anonymous account for converting
 
@@ -1663,13 +1689,19 @@ App::patch('/v1/account/phone')
             throw new Exception(Exception::USER_INVALID_CREDENTIALS);
         }
 
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
+        }
+
         $user
             ->setAttribute('phone', $phone)
             ->setAttribute('phoneVerification', false) // After this user needs to confirm phone number again
             ->setAttribute('search', implode(' ', [$user->getId(), $user->getAttribute('name', ''), $user->getAttribute('email', ''), $phone]));
 
         try {
-            $user = $dbForProject->updateDocument('users', $user->getId(), $user);
+            $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
         } catch (Duplicate $th) {
             throw new Exception(Exception::USER_PHONE_ALREADY_EXISTS);
         }
@@ -1698,13 +1730,22 @@ App::patch('/v1/account/prefs')
     ->label('sdk.offline.model', '/account/prefs')
     ->label('sdk.offline.key', 'current')
     ->param('prefs', [], new Assoc(), 'Prefs key-value JSON object.')
+    ->inject('request')
     ->inject('response')
     ->inject('user')
     ->inject('dbForProject')
     ->inject('events')
-    ->action(function (array $prefs, Response $response, Document $user, Database $dbForProject, Event $events) {
+    ->action(function (array $prefs, Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
 
-        $user = $dbForProject->updateDocument('users', $user->getId(), $user->setAttribute('prefs', $prefs));
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
+        }
+
+        $user->setAttribute('prefs', $prefs);
+
+        $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
 
         $events->setParam('userId', $user->getId());
 
@@ -1734,7 +1775,15 @@ App::patch('/v1/account/status')
     ->inject('events')
     ->action(function (Request $request, Response $response, Document $user, Database $dbForProject, Event $events) {
 
-        $user = $dbForProject->updateDocument('users', $user->getId(), $user->setAttribute('status', false));
+        $timestamp = null;
+        $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+        if (!empty($timestampHeader)) {
+            $timestamp = new \DateTime($timestampHeader);
+        }
+
+        $user->setAttribute('status', false);
+
+        $user = $dbForProject->withRequestTimestamp($timestamp, fn () => $dbForProject->updateDocument('users', $user->getId(), $user));
 
         $events
             ->setParam('userId', $user->getId())
@@ -1783,9 +1832,17 @@ App::delete('/v1/account/sessions/:sessionId')
 
         foreach ($sessions as $key => $session) {/** @var Document $session */
             if ($sessionId == $session->getId()) {
-                unset($sessions[$key]);
+                $timestamp = null;
+                $timestampHeader = $request->getHeader('x-appwrite-timestamp');
+                if (!empty($timestampHeader)) {
+                    $timestamp = new \DateTime($timestampHeader);
+                }
 
-                $dbForProject->deleteDocument('sessions', $session->getId());
+                $dbForProject->withRequestTimestamp($timestamp, function () use ($dbForProject, $session) {
+                    return $dbForProject->deleteDocument('sessions', $session->getId());
+                });
+
+                unset($sessions[$key]);
 
                 $session->setAttribute('current', false);
 
